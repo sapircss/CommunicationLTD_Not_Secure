@@ -47,28 +47,13 @@ class Database:
             raise
 
     def _hash_password(self, password):
-        """
-        SECURITY ADDITION: New method to hash passwords
-        - Uses bcrypt for industry-standard password hashing
-        - Automatically handles salt generation and storage
-        """
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()) #ues bcrypt for password hashing,Automatically handles salt generation and storage
 
     def _verify_password(self, password, hashed):
-        """
-        SECURITY ADDITION: New method to verify passwords
-        - Securely compares hashed passwords
-        - Uses constant-time comparison to prevent timing attacks
-        """
-        return bcrypt.checkpw(password.encode('utf-8'), hashed)
+        return bcrypt.checkpw(password.encode('utf-8'), hashed) #securely compares hashed passwords
 
     def _sanitize_input(self, data):
-        """
-        SECURITY ADDITION: New method to prevent XSS attacks
-        - Escapes HTML special characters in user input
-        - Prevents script injection in rendered output
-        """
-        return {k: html.escape(str(v)) if isinstance(v, str) else v 
+        return {k: html.escape(str(v)) if isinstance(v, str) else v  #escapes html special charachers in user input and prevens script injection
                 for k, v in data.items()}
 
 
@@ -87,26 +72,19 @@ class Database:
             print(f"Table '{table_name}' created successfully.")
 
     def insert_user_to_table(self, table_name, user_data):
-        """
-        SECURITY IMPROVEMENTS:
-        1. Sanitizes input to prevent XSS
-        2. Hashes passwords before storage
-        3. Uses parameterized queries to prevent SQL injection
-        4. Properly handles exceptions
-        """
         try:
-            clean_data = self._sanitize_input(user_data)
+            clean_data = self._sanitize_input(user_data) #Sanitizes input to prevent XSS
             
             if 'password' in clean_data:
-                clean_data['password'] = self._hash_password(clean_data['password'])
+                clean_data['password'] = self._hash_password(clean_data['password']) #Hashes passwords before storage
 
             columns = ', '.join(clean_data.keys())
             placeholders = ', '.join(['?' for _ in clean_data])
-            query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+            query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})" #Uses parameterized queries to prevent SQL injection
             
             self._execute_query(query, tuple(clean_data.values()))
             
-        except sqlite3.IntegrityError as e:
+        except sqlite3.IntegrityError as e: #Properly handles exceptions
             print(f"Error inserting user into '{table_name}': {e}")
             raise
 
@@ -131,47 +109,33 @@ class Database:
             print(f"Error reading table '{table_name}': {e}")
 
     def change_password(self, email: str, old_password: str, new_password: str, table_name='employees') -> bool:
-        """
-        SECURITY IMPROVEMENTS:
-        1. Verifies old password before allowing change
-        2. Uses parameterized queries
-        3. Hashes new password before storage
-        4. Proper error handling
-        """
         try:
-            self.cursor.execute(f"SELECT password FROM {table_name} WHERE email = ?", (email,))
+            self.cursor.execute(f"SELECT password FROM {table_name} WHERE email = ?", (email,)) #Uses parameterized queries
             stored_password = self.cursor.fetchone()
             
-            if stored_password and self._verify_password(old_password, stored_password[0]):
-                new_password_hash = self._hash_password(new_password)
+            if stored_password and self._verify_password(old_password, stored_password[0]): #Verifies old password before allowing change
+                new_password_hash = self._hash_password(new_password) #Hashes new password before storage
                 self._execute_query(
                     f"UPDATE {table_name} SET password = ? WHERE email = ?",
                     (new_password_hash, email)
                 )
                 return True
             return False
-        except sqlite3.Error as e:
+        except sqlite3.Error as e: #Proper error handling
             print(f"Error updating password: {e}")
             return False
         
 
     def validate_user_login(self, email, password):
-        """
-        SECURITY IMPROVEMENTS:
-        1. Uses parameterized query to prevent SQL injection
-        2. Securely verifies hashed passwords
-        3. Uses constant-time comparison
-        4. Proper error handling
-        """
         try:
-            self.cursor.execute("SELECT password FROM employees WHERE email = ?", (email,))
+            self.cursor.execute("SELECT password FROM employees WHERE email = ?", (email,)) #Uses parameterized query to prevent SQL injection
             result = self.cursor.fetchone()
             
-            if result and self._verify_password(password, result[0]):
+            if result and self._verify_password(password, result[0]): #Securely verifies hashed passwords
                 return True
             return False
             
-        except sqlite3.Error as e:
+        except sqlite3.Error as e: #Proper error handling
             print(f"Database error during login validation: {e}")
             return False
         
@@ -230,13 +194,6 @@ class Database:
             return None
  
     def fetch_user_data_from_add_clients_page(self):
-        """
-        SECURITY IMPROVEMENTS:
-        1. Input validation for all fields
-        2. Length checks on inputs
-        3. Sanitization of all inputs
-        4. Proper type hints
-        """
         try:
             user_id = request.form.get('id', '').strip()
             first_name = request.form.get('firstName', '').strip()
@@ -256,12 +213,13 @@ class Database:
             if len(first_name) > 50 or len(last_name) > 50:
                 flash('Names must be less than 50 characters.', 'error')
                 return None
+            #Input validation for all fields above,Length checks on inputs above,
 
             # Create client data dictionary with sanitized inputs
             client_data = {
                 'id': self._sanitize_input({'id': user_id})['id'],
                 'first_name': self._sanitize_input({'first_name': first_name})['first_name'],
-                'last_name': self._sanitize_input({'last_name': last_name})['last_name'],
+                'last_name': self._sanitize_input({'last_name': last_name})['last_name'], #Sanitization of all inputs
             }
 
             return client_data
@@ -272,18 +230,11 @@ class Database:
             return None
 
     def fetch_data_from_a_page(self, page):
-        """
-    SECURITY IMPROVEMENTS:
-    1. Input validation for page parameter
-    2. Limited to specific allowed pages
-    3. Proper error handling
-    4. Type hints
-    """
-        allowed_pages = {'register', 'addClients'}
+        allowed_pages = {'register', 'addClients'} #Limited to specific allowed pages
     
         try:
             if page not in allowed_pages:
-                print(f"Invalid page requested: {page}")
+                print(f"Invalid page requested: {page}") #Input validation for page parameter
                 return None
             
             if page == 'register':
@@ -291,6 +242,6 @@ class Database:
             elif page == 'addClients':
                 return self.fetch_user_data_from_add_clients_page()
             
-        except Exception as e:
+        except Exception as e: #Proper error handling
             print(f"Error fetching data from page {page}: {e}")
             return None

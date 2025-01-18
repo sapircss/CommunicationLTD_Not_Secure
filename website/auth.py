@@ -19,16 +19,8 @@ def login_required(f):
 #Login Page
 @auth.route('/login', methods=['GET','POST'])
 def login():
-    """
-    SECURITY IMPROVEMENTS:
-    1. Checks for existing session to prevent duplicate logins
-    2. Validates required fields
-    3. Uses secure database methods
-    4. Proper session management
-    5. User-friendly error messages
-    """
     if 'user_email' in session:
-        return redirect(url_for('views.home'))
+        return redirect(url_for('views.home')) #Checks for existing session to prevent duplicate logins
         
     if request.method == 'POST':
         email = request.form.get('email')
@@ -56,27 +48,14 @@ def login():
 @auth.route('/logout')
 @login_required  # SECURITY: Protect logout route
 def logout():
-    """
-    SECURITY IMPROVEMENTS:
-    1. Protected with login_required
-    2. Properly clears session
-    3. Redirects to login page
-    """
-    session.pop('user_email', None)
+    session.pop('user_email', None) #Properly clears session
     flash('Logged out successfully!', 'success')
-    return redirect(url_for('auth.login'))
+    return redirect(url_for('auth.login')) #Redirects to login page
 
 
 #Register Page
 @auth.route('/register', methods=['GET','POST'])
 def register():
-    """
-    SECURITY IMPROVEMENTS:
-    1. Proper error handling
-    2. Input validation
-    3. Secure database operations
-    4. User feedback through flash messages
-    """
     if request.method == 'POST':
         db = Database()
         try:
