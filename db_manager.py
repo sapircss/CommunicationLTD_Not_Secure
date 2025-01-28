@@ -1,247 +1,130 @@
 import sqlite3
-from flask import request, flash, url_for, redirect
 from prettytable import PrettyTable
-import bcrypt  # Added for secure password hashing
-import html  # Added for XSS prevention
-from typing import Dict, Any  # Added for type hints
 
 class Database:
+    # Define columns for the `employees` table
     EMPLOYEES_COLUMNS = {
         'id': 'INTEGER PRIMARY KEY UNIQUE',
         'first_name': 'TEXT NOT NULL',
         'last_name': 'TEXT NOT NULL',
-        'password': 'TEXT NOT NULL', # Will store hashed passwords instead of plaintext
+        'password': 'TEXT NOT NULL',
         'email': 'TEXT NOT NULL UNIQUE',
     }
 
+    # Define columns for the `clients` table
     CLIENTS_COLUMNS = {
         'id': 'INTEGER PRIMARY KEY UNIQUE',
         'first_name': 'TEXT NOT NULL',
         'last_name': 'TEXT NOT NULL',
     }
 
-    TABLES_COLUMNS = {
-        'employees': EMPLOYEES_COLUMNS,
-        'clients': CLIENTS_COLUMNS
-    }
-
-    def __init__(self, db_name='company.db'): # The location of where the db is can be changed.
-        """Establish a single connection during object initialization"""
+    def __init__(self, db_name='company.db'):
+        # Allow multiple SQL statements by setting isolation_level=None
         self.db_name = db_name
-        self.conn = sqlite3.connect(self.db_name)
-        self.conn.execute("PRAGMA foreign_keys = ON") # SECURITY: Enable foreign key support to maintain data integrity - Guy
+        self.conn = sqlite3.connect(self.db_name, isolation_level=None)
         self.cursor = self.conn.cursor()
-        print("Database Connection establish")
+        print("Database Connection established")
 
-    def _execute_query(self, query: str, params = ()):
-        """
-        SECURITY IMPROVEMENT:
-           Uses parameterized queries instead of string formatting
-        - Prevents SQL injection attacks
-        """
+    def _execute_query(self, query):
+        # Allow execution of multiple SQL statements using executescript
         try:
-            self.cursor.execute(query, params)
+            print(f"Executing query:\n{query}")  # Log the query being executed
+            self.cursor.executescript(query)  # Use executescript for multiple commands
             self.conn.commit()
         except sqlite3.Error as e:
-            print(f"Database error during query execution: {e}")
+            print(f"Database error: {e}")
             raise
 
-    def _hash_password(self, password):
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()) #ues bcrypt for password hashing,Automatically handles salt generation and storage
-
-    def _verify_password(self, password, hashed):
-        return bcrypt.checkpw(password.encode('utf-8'), hashed) #securely compares hashed passwords
-
-    def _sanitize_input(self, data):
-        return {k: html.escape(str(v)) if isinstance(v, str) else v  #escapes html special charachers in user input and prevens script injection
-                for k, v in data.items()}
-
-
-    def create_table(self, table_name: str) -> None:
-        if table_name.lower() not in self.TABLES_COLUMNS:
-            print(f"Invalid table name '{table_name}'")
-            return
-
-        self.cursor.execute("SELECT name FROM sqlite_master WHERE type=? AND name=?", ('table', table_name))
-
-        if not self.cursor.fetchone():
-            columns = self.TABLES_COLUMNS[table_name.lower()]
-            columns_definition = ', '.join(f'{col} {dtype}' for col, dtype in columns.items())
-            create_table_query = f"CREATE TABLE {table_name} ({columns_definition});"
-            self._execute_query(create_table_query)
-            print(f"Table '{table_name}' created successfully.")
+    def create_table(self, table_name):
+        # Create a table with dynamically constructed SQL. Vulnerable to SQL Injection.
+        query = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY UNIQUE,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            password TEXT,
+            email TEXT UNIQUE
+        )
+        """
+        self._execute_query(query)
 
     def insert_user_to_table(self, table_name, user_data):
-        try:
-            clean_data = self._sanitize_input(user_data) #Sanitizes input to prevent XSS
-            
-            if 'password' in clean_data:
-                clean_data['password'] = self._hash_password(clean_data['password']) #Hashes passwords before storage
+        # Insert user data into the specified table. Vulnerable to SQL Injection.
+        columns = ', '.join(user_data.keys())
+        values = ', '.join([f"'{v}'" for v in user_data.values()])  # Directly inserts user input
+        query = f"INSERT INTO {table_name} ({columns}) VALUES ({values})"
+        print(f"Inserting into {table_name}:\n{query}")  # Log query for debugging
+        self._execute_query(query)
 
-            columns = ', '.join(clean_data.keys())
-            placeholders = ', '.join(['?' for _ in clean_data])
-            query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})" #Uses parameterized queries to prevent SQL injection
-            
-            self._execute_query(query, tuple(clean_data.values()))
-            
-        except sqlite3.IntegrityError as e: #Properly handles exceptions
-            print(f"Error inserting user into '{table_name}': {e}")
-            raise
-
-
-    def print_table(self, table_name):
-        """Print all rows from a specified table"""
-        try:
-            self.cursor.execute(f"SELECT * FROM {table_name}")
-            rows = self.cursor.fetchall()
-            if rows:
-                self.cursor.execute(f"PRAGMA table_info('{table_name}')") #returns metadata about the columns in the table
-                columns_name = [info[1] for info in self.cursor.fetchall()]
-                table = PrettyTable()
-                table.field_names = columns_name
-                for row in rows:
-                    table.add_row(row)
-                print(f"\nContents of table '{table_name}':")
-                print(table)
-            else:
-                print(f"Table '{table_name}' is empty.")
-        except sqlite3.Error as e:
-            print(f"Error reading table '{table_name}': {e}")
-
-    def change_password(self, email: str, old_password: str, new_password: str, table_name='employees') -> bool:
-        try:
-            self.cursor.execute(f"SELECT password FROM {table_name} WHERE email = ?", (email,)) #Uses parameterized queries
-            stored_password = self.cursor.fetchone()
-            
-            if stored_password and self._verify_password(old_password, stored_password[0]): #Verifies old password before allowing change
-                new_password_hash = self._hash_password(new_password) #Hashes new password before storage
-                self._execute_query(
-                    f"UPDATE {table_name} SET password = ? WHERE email = ?",
-                    (new_password_hash, email)
-                )
-                return True
-            return False
-        except sqlite3.Error as e: #Proper error handling
-            print(f"Error updating password: {e}")
-            return False
-        
+    def fetch_users(self, table_name):
+        # Fetch all users from the specified table. Vulnerable to SQL Injection.
+        query = f"SELECT * FROM {table_name}"
+        print(f"Fetching users with query: {query}")  # Log query for debugging
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
 
     def validate_user_login(self, email, password):
-        try:
-            self.cursor.execute("SELECT password FROM employees WHERE email = ?", (email,)) #Uses parameterized query to prevent SQL injection
-            result = self.cursor.fetchone()
-            
-            if result and self._verify_password(password, result[0]): #Securely verifies hashed passwords
-                return True
-            return False
-            
-        except sqlite3.Error as e: #Proper error handling
-            print(f"Database error during login validation: {e}")
-            return False
-        
+        # Validate user login by checking email and password. Vulnerable to SQL Injection.
+        query = f"SELECT * FROM employees WHERE email = '{email}' AND password = '{password}'"
+        print(f"Validating login with query: {query}")  # Log query for debugging
+        self.cursor.execute(query)
+        result = self.cursor.fetchone()
 
+        # Detect SQL Injection
+        if "' OR" in email or "--" in email:
+            print("Hacked SQL Injection detected in login validation!")
 
+        return bool(result)
 
+    def print_table(self, table_name):
+        # Print the contents of the specified table. Vulnerable to SQL Injection.
+        query = f"SELECT * FROM {table_name}"
+        print(f"Printing table with query: {query}")  # Log query for debugging
+        self.cursor.execute(query)
+        rows = self.cursor.fetchall()
+        if rows:
+            # Fetch table column names for printing
+            self.cursor.execute(f"PRAGMA table_info('{table_name}')")
+            columns_name = [info[1] for info in self.cursor.fetchall()]
+            table = PrettyTable()
+            table.field_names = columns_name
+            for row in rows:
+                table.add_row(row)
+            print(table)
+        else:
+            print(f"Table '{table_name}' is empty.")
 
-    def fetch_user_data_from_register_page(self):
-        try:
-            email = request.form.get('email', '').strip()
-            user_id = request.form.get('id', '').strip()
-            first_name = request.form.get('firstName', '').strip()
-            last_name = request.form.get('lastName', '').strip()
-            password1 = request.form.get('password1', '')
-            password2 = request.form.get('password2', '')
+    def change_password(self, email, old_password, new_password):
+        # Change the password for a user. Vulnerable to SQL Injection.
+        old_hashed = old_password  # In a secure version, this would hash the password
+        new_hashed = new_password  # In a secure version, this would hash the password
 
-            # Validate all required fields are present
-            if not all([email, user_id, first_name, last_name, password1, password2]):
-                flash('All fields are required.', 'error')
-                return None
+        query = f"""
+        UPDATE employees
+        SET password = '{new_hashed}'
+        WHERE email = '{email}' AND password = '{old_hashed}'
+        """
+        print(f"Changing password with query: {query}")  # Log query for debugging
+        self._execute_query(query)
+        return True
 
-            # Validate email format
-            if not '@' in email or not '.' in email:
-                flash('Please enter a valid email address.', 'error')
-                return None
+    def delete_user(self, table_name, user_id):
+        # Delete a user by ID. Vulnerable to SQL Injection.
+        query = f"DELETE FROM {table_name} WHERE id = {user_id}"
+        print(f"Deleting user with query: {query}")  # Log query for debugging
+        self._execute_query(query)
 
-            # Validate ID is numeric
-            if not user_id.isdigit():
-                flash('ID must contain only numbers.', 'error')
-                return None
+    def update_user(self, table_name, user_id, update_data):
+        # Update a user's data. Vulnerable to SQL Injection.
+        set_clause = ', '.join([f"{key} = '{value}'" for key, value in update_data.items()])
+        query = f"UPDATE {table_name} SET {set_clause} WHERE id = {user_id}"
+        print(f"Updating user with query: {query}")  # Log query for debugging
+        self._execute_query(query)
 
-            # Validate name lengths
-            if len(first_name) > 50 or len(last_name) > 50:
-                flash('Names must be less than 50 characters.', 'error')
-                return None
-
-            # Validate passwords match
-            if password1 != password2:
-                flash('Passwords do not match.', 'error')
-                return None
-
-            # Create user data dictionary with sanitized inputs
-            user_data = {
-                'id': self._sanitize_input({'id': user_id})['id'],
-                'first_name': self._sanitize_input({'first_name': first_name})['first_name'],
-                'last_name': self._sanitize_input({'last_name': last_name})['last_name'],
-                'password': password1,  # Will be hashed later in insert_user_to_table
-                'email': self._sanitize_input({'email': email})['email'],
-            }
-
-            return user_data
-
-        except Exception as e:
-            print(f"Error processing registration data: {e}")
-            flash('An error occurred while processing your registration.', 'error')
-            return None
- 
-    def fetch_user_data_from_add_clients_page(self):
-        try:
-            user_id = request.form.get('id', '').strip()
-            first_name = request.form.get('firstName', '').strip()
-            last_name = request.form.get('lastName', '').strip()
-
-            # Validate all required fields are present
-            if not all([user_id, first_name, last_name]):
-                flash('All fields are required.', 'error')
-                return None
-
-            # Validate ID is numeric
-            if not user_id.isdigit():
-                flash('ID must contain only numbers.', 'error')
-                return None
-
-             #Validate name lengths
-            if len(first_name) > 50 or len(last_name) > 50:
-                flash('Names must be less than 50 characters.', 'error')
-                return None
-            #Input validation for all fields above,Length checks on inputs above,
-
-            # Create client data dictionary with sanitized inputs
-            client_data = {
-                'id': self._sanitize_input({'id': user_id})['id'],
-                'first_name': self._sanitize_input({'first_name': first_name})['first_name'],
-                'last_name': self._sanitize_input({'last_name': last_name})['last_name'], #Sanitization of all inputs
-            }
-
-            return client_data
-
-        except Exception as e:
-            print(f"Error processing client data: {e}")
-            flash('An error occurred while processing client data.', 'error')
-            return None
-
-    def fetch_data_from_a_page(self, page):
-        allowed_pages = {'register', 'addClients'} #Limited to specific allowed pages
-    
-        try:
-            if page not in allowed_pages:
-                print(f"Invalid page requested: {page}") #Input validation for page parameter
-                return None
-            
-            if page == 'register':
-                return self.fetch_user_data_from_register_page()
-            elif page == 'addClients':
-                return self.fetch_user_data_from_add_clients_page()
-            
-        except Exception as e: #Proper error handling
-            print(f"Error fetching data from page {page}: {e}")
-            return None
+    def close(self):
+        # Close the database connection
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
+        print("Database connection closed.")
